@@ -1,0 +1,378 @@
+---
+title: "Untitled"
+author: "Fadumo Hussein"
+date: "2024-06-11"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+# Import library
+library(tidyr)
+library(dplyr) 
+library(tidyverse)
+library(stringr)
+library(lubridate)
+library(readr)   
+library(readxl) 
+
+# Import datasets
+WorkshopRegistrations <- "WorkshopRegistrations.csv"
+workshop_categories_1_ <- "workshop_categories_1_.xlsx"
+all_users <- "all_users.csv"
+
+
+# Words to filter out
+words_to_filter <- c("Cancelled", "CANCELED")
+
+# Create a regular expression pattern for case-insensitive matching
+pattern <- paste0("(?i)", paste(words_to_filter, collapse = "|"))
+
+# Filter out rows containing any of the words to filter out
+WorkshopRegistrations2 <- WorkshopRegistrations %>%
+  filter(!str_detect(title, pattern))
+
+# Separate presenters into multiple columns
+WorkshopRegistrations2 <- separate(WorkshopRegistrations2, presenter, into = c("presenter1", "presenter2", "presenter3", "presenter4"), ", | and | , and ", remove = FALSE)
+
+# Clean presenter names
+WorkshopRegistrations2 <- WorkshopRegistrations2 %>%
+  mutate_at(vars(starts_with("presenter")), ~gsub("and", "", .) %>% trimws())
+
+# Convert certain presenter names to NA
+WorkshopRegistrations2 <- WorkshopRegistrations2 %>%
+  mutate_at(vars(starts_with("presenter")), ~if_else(. %in% c("PhD", "UVA Research Computing", "Research Computing"), NA_character_, .))
+
+# Parse dates
+WorkshopRegistrations2$start <- ymd_hms(WorkshopRegistrations2$start)
+WorkshopRegistrations2$end <- ymd_hms(WorkshopRegistrations2$end)
+```
+
+```{r}
+# Merge workshop data with categories (dataset from juwon)
+merged_df <- merge(WorkshopRegistrations2, workshop_categories_1_, by.x = "title", by.y = "Title", all.x = TRUE)
+
+View(merged_df)
+```
+
+```{r}
+# Check to see if titles do not have categories
+titles_with_na_category <- subset(merged_df, is.na(Category))$title
+titles_with_na_category
+```
+
+
+```{r}
+
+# Define title-category mapping
+title_category_mapping <- data.frame(
+  title = c("Beginner Python for Scientists", "Building containers for Rivanna", "Data Transfer - How to use Globus", "Matlab Parallel/GPU Computing", "RNA-Seq Analysis Part 1", "RNA-Seq Analysis Part 2", "Scientific Computing with Julia on Rivanna", "Single cell RNA-analysis", "Tensorflow -- Turning the Knobs (Overview session and Q&A session)", "Using Bioinformatics tools on Rivanna", "Data Transfer with Globus", "Using Bioinformatics Tools on Rivanna"),  
+  Category = c("Python", "HPC", "Globus", "HPC", "Bioinformatics", "Bioinformatics", "HPC", "Bioinformatics", "HPC", "Bioinformatics", "Globus", "Bioinformatics")  
+)
+
+# Merge WorkshopRegistrations2 and workshop_categories_1_
+WorkshopRegistrations2 <- merge(WorkshopRegistrations2, workshop_categories_1_, by.x = "title", by.y = "Title", all.x = TRUE) %>%
+  left_join(title_category_mapping, by = "title") %>%
+  mutate(Category = coalesce(Category.x, Category.y)) %>%
+  select(-Category.x, -Category.y)
+
+# View the updated merged dataframe
+View(WorkshopRegistrations2)
+
+```
+
+
+
+
+```{r}
+# I noticed some names that were misspelled so I fixed them 
+corrections <- data.frame(
+  incorrect_name = c("Glady Andino"),
+  correct_name = c("Gladys Andino")
+)
+
+# Correct misspelled names
+WorkshopRegistrations2 <- WorkshopRegistrations2 %>%
+  left_join(corrections, by = c("presenter1" = "incorrect_name")) %>%
+  mutate(presenter1 = coalesce(correct_name, presenter1)) %>%
+  select(-correct_name) %>%
+  select(-presenter)
+```
+
+
+
+
+```{r}
+# I took some titles in and placed them into categories I thought were appropriate 
+# Assuming WorkshopRegistrations2 is your data frame and 'title' is the column containing the titles
+WorkshopRegistrations2 <- WorkshopRegistrations2 %>%
+  mutate(subcategory = case_when(
+    str_detect(title, regex("Alphafold on Rivanna|Building and Running C/C\\+\\+/Fortran Codes on Rivanna|Building containers for Rivanna|Building Containers for Rivanna|Compiling and running C/C\\+\\+/Fortran on Rivanna|GPU-Enabled Applications on Rivanna|Making R Run Faster on Rivanna|Rivanna from the Command Line|Scientific Computing with Julia on Rivanna|Using Bioinformatics tools on Rivanna|Using Bioinformatics Tools on Rivanna|Using Containers on Rivanna|Using Rivanna from the Command Line|Using Spark on Rivanna|Using Spark on Rivanna|Using the Julia Programming Language on Rivanna|Software Containers for HPC environments|High Performance Computing Best Practices|High Performance Computing from a Web Browser|High Performance Computing from a Terminal Window|High Performance Python", ignore_case = TRUE)) ~ "HPC",
+    TRUE ~ "Other"
+  ))
+
+```
+
+
+```{r}
+WorkshopRegistrations2$title[WorkshopRegistrations2$title == "Using Bioinformatics tools on Rivanna"] <- "Using Bioinformatics Tools on Rivanna"
+
+
+WorkshopRegistrations2$title[WorkshopRegistrations2$title == "R with MPI"] <- "Parallelizing R with MPI"
+
+WorkshopRegistrations2$title[WorkshopRegistrations2$title == "Building containers for Rivanna"] <- "Building Containers for Rivanna"
+
+
+WorkshopRegistrations2$title[WorkshopRegistrations2$title == "Introduction to Python (continuation)"] <- "Introduction to Python for Scientists"
+
+WorkshopRegistrations2$title[WorkshopRegistrations2$title == "Introduction to Python (2 days)"] <- "Introduction to Python for Scientists"
+
+WorkshopRegistrations2$title[WorkshopRegistrations2$title == "Intro to Machine Learning with Python"] <- "Machine Learning with Python"
+
+
+WorkshopRegistrations2$title[WorkshopRegistrations2$title == "Bioinformatics Data Visualization with Seurat for Single Cell Analysis"] <- "Bioinformatics Data Visualization"
+
+WorkshopRegistrations2$title[WorkshopRegistrations2$title == "RNA-Seq Analysis Part 1"] <- "RNA-Seq Analysis"
+
+WorkshopRegistrations2$title[WorkshopRegistrations2$title == "RNA-Seq Analysis Part 2"] <- "RNA-Seq Analysis"
+
+
+WorkshopRegistrations2$title[WorkshopRegistrations2$title ==  "Optimizing Matlab Code"] <- "Optimization Methods in Matlab"
+
+
+WorkshopRegistrations2$title[WorkshopRegistrations2$title ==  "Rivanna from the Command Line"] <- "Using Rivanna from the Command Line"
+
+WorkshopRegistrations2$title[WorkshopRegistrations2$title ==  "Using HPC from your browser"] <- "High Performance Computing from a Web Browser"
+
+WorkshopRegistrations2$title[WorkshopRegistrations2$title ==  "Scientific Computing with Julia on Rivanna"] <- "Using the Julia Programming Language on Rivanna"
+
+
+WorkshopRegistrations2$title[WorkshopRegistrations2$title ==  "Compiling and running C/C++/Fortran on Rivanna"] <- "Building and Running C/C++/Fortran Codes on Rivanna"
+
+WorkshopRegistrations2$title[WorkshopRegistrations2$title ==  "Data Transfer with Globus"] <- "Data Transfer - How to use Globus"
+
+WorkshopRegistrations2$title[WorkshopRegistrations2$title ==  "Tensorflow -- Turning the Knobs (Overview session and Q&A session)"] <- "Tensorflow -- Turning the Knobs"
+
+```
+
+```{r}
+registrations <- WorkshopRegistrations2 %>%
+  filter(!is.na(booking_id)) %>%  # Filter out rows where booking_id is NA
+  group_by(title) %>%
+  summarise(registrations = n_distinct(booking_id), .groups = "drop")
+
+# View the registrations data
+# Merge df2 with df1 based on 'title'
+merged_df <- merge(registrations, WorkshopRegistrations2, by = "title", all.x = TRUE)
+
+
+# Created seperate columns for the month and year based on start date
+WorkshopRegistrations2 <- WorkshopRegistrations2 %>%
+  mutate(start = ymd_hms(start),
+         year_value = year(start),
+         month_value = month(start))
+all_unique <- length(unique(WorkshopRegistrations2$booking_id)) == nrow(WorkshopRegistrations2)
+print(all_unique)  
+
+WorkshopRegistrations2 <- subset(WorkshopRegistrations2, select = -subcategory) 
+
+```
+
+```{r}
+# Changed titles into different categories
+WorkshopRegistrations2 <- WorkshopRegistrations2 %>%
+  mutate(
+    Category = case_when(
+      title == "Deep Learning with PyTorch" ~ "Python",
+      title == "Introduction to Deep Learning Using Keras/TensorFlow" ~ "Python",
+      title == "GPU Use in Deep Learning Frameworks" ~ "Python",
+      title == "GPU-Enabled Applications on Rivanna" ~ "HPC",
+      title == "Using GPUs in Deep Learning Frameworks" ~ "Python",
+      title == "Tensorflow -- Turning the Knobs (Overview session and Q&A session)" ~ "Python",
+      title == "Compiling and running C/C++/Fortran on Rivanna" ~ "Programming",
+      title == "Making R Run Faster on Rivanna" ~ "R",
+      title == "Matlab Parallel/GPU Computing" ~ "Matlab",
+      title == "Scientific Computing with Julia on Rivanna" ~ "Programming",
+      title == "Using the Julia Programming Language on Rivanna" ~ "Programming",
+      title == "Building Containers for Rivanna" ~ "Containers",
+      title == "Building Containers for Rivanna" ~ "Containers",
+      TRUE ~ Category  # Keep existing Category if no condition matches
+    )
+  )
+
+# See changes 
+View(WorkshopRegistrations2)
+```
+
+```{r}
+# Save on local device 
+write.csv(WorkshopRegistrations2, "Workshop_Registration.csv")
+```
+
+```{r}
+
+# This creates a new data frame, merged_df, that contains all columns from both data frames
+# for rows where the 'email' matches in both data frames.
+merged_df <- merge(Workshop_Registration, user_data, by = "email")
+filtered_merge <- merged_df %>%
+  filter(date_of_query > start) %>%
+  group_by(email) %>%
+  # Within each group (email), compute the time difference between 'date_of_query' and 'start' in seconds
+  # and select the row with the smallest time difference
+  slice(which.min(difftime(date_of_query, start, units = "secs"))) %>%
+  ungroup()
+
+school_lookup <- data.frame(
+  Code = c("AS", "EN", "AR", "DA", "DS", "ED", "MC", "MD", "RC", "BI", "PV"),
+  Name = c(
+    "College and Graduate School of Arts & Sciences", 
+    "School of Engineering and Applied Science", 
+    "School of Architecture", 
+    "DA-Academic Operations", 
+    "School of Data Science", 
+    "School of Education and Human Development", 
+    "McIntire School of Commerce", 
+    "School of Medicine", 
+    "Research Computing", 
+    "Biocomplexity Institute", 
+    "PV"
+  ),
+  stringsAsFactors = FALSE
+)
+```
+
+```{r}
+# The replace_school_codes function is designed to replace school codes in a data frame with their corresponding names using a lookup table
+
+replace_school_codes <- function(df, lookup) {
+  df <- df %>%
+    mutate(School_Code = sub(".*\\((.*)\\)", "\\1", School)) %>%  # Extract code
+    left_join(lookup, by = c("School_Code" = "Code")) %>%
+    mutate(School = ifelse(is.na(Name), School, Name)) %>%  # Replace code with name
+    select(-School_Code, -Name)  # Remove unnecessary columns
+  return(df)
+}
+
+transformed_data <- replace_school_codes(filtered_merge, school_lookup)
+write.csv(transformed_data, "transformed_data.csv")
+```
+
+
+```{r}
+# Merge the Workshop_Registration data frame with user_data based on the 'email' column
+# This performs a left join to include all rows from Workshop_Registration and matching rows from user_data
+merged_Workshop_Registration <- merge(Workshop_Registration, user_data, by = "email", all.x = TRUE)
+
+# Convert columns to appropriate data types for better data handling
+merged_Workshop_Registration$start <- ymd_hms(merged_Workshop_Registration$start, tz = "America/New_York")  # Convert 'start' to date-time format
+
+# Convert columns to appropriate data types for better data handling
+merged_Workshop_Registration$end <- ymd_hms(merged_Workshop_Registration$end, tz = "America/New_York")  # Convert 'start' to date-time format
+
+merged_Workshop_Registration$date_of_query <- ymd(merged_Workshop_Registration$date_of_query, tz = "America/New_York")  # Convert 'date_of_query' to date format
+
+# Ensure that merged_Workshop_Registration is treated as a data frame
+merged_Workshop_Registration <- as.data.frame(merged_Workshop_Registration)
+
+# Step 1: Identify users with only one unique 'date_of_query'
+users_with_single_query <- merged_Workshop_Registration %>%
+  group_by(email) %>%
+  summarise(unique_queries = n_distinct(date_of_query)) %>%  # Count unique 'date_of_query' per email
+  filter(unique_queries == 1) %>%  # Keep only those with exactly one unique query date
+  select(email)  # Select only the email column
+
+# Filter the original merged data to include only users with a single 'date_of_query'
+single_query_users <- merged_Workshop_Registration %>%
+  semi_join(users_with_single_query, by = "email")
+
+# Step 2: Identify users with multiple unique 'date_of_query'
+multiple_query_users <- merged_Workshop_Registration %>%
+  anti_join(users_with_single_query, by = "email")  # Exclude users with a single query date
+
+# Step 3: Filter multiple query users to include only those where 'date_of_query' is before 'start'
+filtered_multiple_query_users <- multiple_query_users %>%
+  group_by(email, title, id, start) %>%
+  filter(date_of_query < start) %>%  # Keep rows where 'date_of_query' is before 'start'
+  ungroup()  # Ungroup the data
+
+# Step 4: For users with multiple queries, keep only the earliest 'date_of_query'
+filtered_multiple_query_users <- filtered_multiple_query_users %>%
+  group_by(email, title, id, start) %>%
+  filter(date_of_query == min(date_of_query, na.rm = TRUE)) %>%  # Select the earliest 'date_of_query'
+  ungroup()  # Ungroup the data
+
+# Combine both filtered single query users and filtered multiple query users into a final dataset
+final_merged_Workshop_Registration <- bind_rows(single_query_users, filtered_multiple_query_users)
+
+# Remove any duplicate rows in the final dataset
+final_merged_Workshop_Registration <- final_merged_Workshop_Registration %>%
+  distinct()
+
+# Save the cleaned data to a new CSV file (optional)
+write.csv(final_merged_Workshop_Registration, "cleaned_data.csv", row.names = FALSE)
+
+# Print the resulting cleaned data frame to the console
+print(final_merged_Workshop_Registration)
+
+```
+
+```{r}
+# Included School of Continuing and Professional Studies 
+final_merged_Workshop_Registration <- final_merged_Workshop_Registration %>%
+  mutate(School = ifelse(str_detect(Affiliation, "^U1:SCPS") & School == "OTHER", "SCPS", School))
+
+```
+
+
+
+```{r}
+# Step 1: Identify users with multiple unique email addresses
+multiple_emails <- final_merged_Workshop_Registration %>%
+  group_by(first_name, last_name) %>%
+  summarise(
+    email_count = n_distinct(email),  # Count the number of unique emails for each person
+    emails = paste(unique(email), collapse = ", ")  # Concatenate all unique emails into a single string
+  ) %>%
+  filter(email_count > 1) %>%  # Keep only those individuals who have more than one unique email
+  ungroup()  # Ungroup the data
+
+# Output: A data frame with users having multiple emails
+
+# Step 2: Create a mapping of approved emails
+approved_email_map <- user_data %>%
+  group_by(first_name, last_name) %>%
+  summarize(
+    approved_email = first(email),  # Assign the first email found as the approved email for each person
+    .groups = "drop"  # Drop the grouping structure after summarizing
+  )
+
+# Output: A data frame with each person and their approved email
+
+# Step 3: Update the email addresses in the original data frame
+updated_df <- final_merged_Workshop_Registration %>%
+  rowwise() %>%
+  mutate(
+    email_list = strsplit(email, ", ") %>% unlist()  # Split the comma-separated emails into a list
+  ) %>%
+  ungroup() %>%
+  left_join(approved_email_map, by = c("first_name", "last_name")) %>%
+  rowwise() %>%
+  mutate(
+    email_list = paste(sapply(email_list, function(e) {
+      if (e %in% user_data$email) {
+        return(e)  # Keep the email if it is in the user_data email list
+      } else {
+        return(approved_email)  # Replace with approved email if not in the user_data list
+      }
+    }), collapse = ", ")  # Concatenate the updated emails back into a single string
+  ) %>%
+  select(-approved_email) %>%  # Remove the 'approved_email' column
+  rename(updated_email = email_list)  # Rename the 'email_list' column to 'updated_email'
+
+# Output: A data frame with updated email addresses
+write.csv(df_updated, "df_updated.csv", row.names = FALSE)
+```
+
