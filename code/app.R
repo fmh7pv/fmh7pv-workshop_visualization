@@ -1,161 +1,133 @@
-# Load the transformed data from a CSV file
-transformed_data <- read.csv("transformed_data.csv")
+# Load the updated workshop registration data from a CSV file
+df_updated <- read.csv("df_updated.csv")
 
-# Load required libraries
-library(shiny)
-library(rsconnect)
-library(dplyr)
-library(tidyr)
-library(ggplot2)
-library(plotly)
-library(lubridate)  # For date functions
+# Load necessary libraries for the application
+library(shiny)          # For building interactive web applications
+library(dplyr)          # For data manipulation
+library(lubridate)      # For handling date and time
+library(plotly)         # For interactive plots
+library(RColorBrewer)   # For color palettes in plots
 
-# Define the User Interface (UI)
+# Convert datetime columns to appropriate formats
+df_updated$start <- ymd_hms(df_updated$start)                # Convert 'start' to datetime
+df_updated$end <- ymd_hms(df_updated$end)                    # Convert 'end' to datetime
+df_updated$registered_date <- ymd_hms(df_updated$registered_date)  # Convert 'registered_date' to datetime
+
+# Create a combined datetime column (using 'start' as reference)
+df_updated$datetime <- as.POSIXct(df_updated$start)
+
+# Extract time of day (hour and minute) from the 'start' column
+df_updated$time_of_day <- format(df_updated$start, "%H:%M")
+
+# Extract year and semester from 'start'
+df_updated$year_value <- year(df_updated$start)  # Extract year
+df_updated$semester <- case_when(
+  month(df_updated$start) %in% 1:5 ~ "Spring",   # Months 1-5 are Spring
+  month(df_updated$start) %in% 6:8 ~ "Summer",   # Months 6-8 are Summer
+  month(df_updated$start) %in% 9:12 ~ "Fall",     # Months 9-12 are Fall
+  TRUE ~ "Unknown"  # In case of unexpected values
+)
+
+# Define the user interface (UI) for the Shiny application
 ui <- fluidPage(
-  titlePanel("Bar Graph of Demographics"),
+  titlePanel("Workshop Registrants Analysis"),  # Application title
+  
   sidebarLayout(
     sidebarPanel(
       # Input for selecting year(s)
-      selectInput("year", "Select Year", choices = sort(unique(transformed_data$year_value)), multiple = TRUE),
+      selectInput("year", "Year:", choices = unique(df_updated$year_value), selected = NULL, multiple = TRUE),
       
       # Input for selecting semester(s)
-      selectInput("semester", "Select Semester", 
-                  choices = sort(c("Fall", "Spring", "Summer")), 
-                  multiple = TRUE), 
+      selectInput("semester", "Semester:", choices = c("", unique(df_updated$semester)), selected = NULL, multiple = TRUE),
       
-      # Dynamic UI for selecting category
-      uiOutput("categoryUI"),
+      # Input for selecting category(ies)
+      selectInput("category", "Category:", choices = c("", unique(df_updated$Category)), selected = NULL, multiple = TRUE),
       
-      # Dynamic UI for selecting workshop titles
-      uiOutput("titleUI"),
+      # Input for selecting workshop title(s)
+      selectInput("title", "Workshop Title:", choices = c("", unique(df_updated$title)), selected = NULL, multiple = TRUE),
       
-      # Input for selecting school(s) or organization(s)
-      selectInput("school", "Select School or Organization", 
-                  choices = sort(unique(transformed_data$School[transformed_data$School != "OTHER"])), 
-                  multiple = TRUE)
+      # Dynamically generated UI for selecting schools
+      uiOutput("school_ui")
     ),
+    
     mainPanel(
-      # Output for displaying the bar plot
-      plotlyOutput("barPlot")
+      # Output: Plotly plot
+      plotlyOutput("workshopPlot")
     )
   )
 )
 
-# Define the server logic
+# Define server logic for the Shiny application
 server <- function(input, output, session) {
   
-  # Create dynamic UI for category selection based on year and semester inputs
-  output$categoryUI <- renderUI({
-    filtered_categories <- unique(transformed_data$Category)
+  # Reactive expression to filter and process data based on user inputs
+  filtered_data <- reactive({
+    data_filtered <- df_updated
     
-    # Filter categories based on selected year(s) and semester(s)
-    if (length(input$year) > 0 || length(input$semester) > 0) {
-      filtered_data <- transformed_data
-      
-      # Filter by selected years
-      if (length(input$year) > 0) {
-        filtered_data <- filtered_data %>% filter(year_value %in% input$year)
-      }
-      
-      # Filter by selected semesters
-      if (length(input$semester) > 0) {
-        filtered_data <- filtered_data %>%
-          filter(
-            (input$semester %in% "Spring" & month(as.POSIXct(start)) %in% 1:5) |
-              (input$semester %in% "Summer" & month(as.POSIXct(start)) %in% 6:7) |
-              (input$semester %in% "Fall" & month(as.POSIXct(start)) %in% 8:12)
-          )
-      }
-      
-      filtered_categories <- unique(filtered_data$Category)
+    # Exclude rows where School is 'NA' or 'OTHER'
+    data_filtered <- data_filtered %>%
+      filter(!(School %in% c('NA', 'OTHER')))
+    
+    # Apply filters based on user selections
+    if (!is.null(input$year) && length(input$year) > 0) {
+      data_filtered <- data_filtered %>% filter(year_value %in% input$year)
     }
     
-    # Render selectInput for category
-    selectInput("category", "Select Category", choices = sort(filtered_categories), multiple = TRUE)
+    if (!is.null(input$semester) && length(input$semester) > 0) {
+      data_filtered <- data_filtered %>% filter(semester %in% input$semester)
+    }
+    
+    if (!is.null(input$category) && length(input$category) > 0) {
+      data_filtered <- data_filtered %>% filter(Category %in% input$category)
+    }
+    
+    if (!is.null(input$title) && length(input$title) > 0) {
+      data_filtered <- data_filtered %>% filter(title %in% input$title)
+    }
+    
+    if (!is.null(input$school) && length(input$school) > 0) {
+      data_filtered <- data_filtered %>% filter(School %in% input$school)
+    }
+    
+    data_filtered  # Return the filtered data
   })
   
-  # Create dynamic UI for title selection based on category, year, and semester inputs
-  output$titleUI <- renderUI({
-    filtered_titles <- unique(transformed_data$title)
-    
-    # Filter titles based on selected categories, year(s), and semester(s)
-    if (length(input$category) > 0) {
-      filtered_data <- transformed_data %>%
-        filter(Category %in% input$category) %>%
-        filter(year_value %in% input$year)
-      
-      if (length(input$semester) > 0) {
-        filtered_data <- filtered_data %>%
-          filter(
-            (input$semester %in% "Spring" & month(as.POSIXct(start)) %in% 1:5) |
-              (input$semester %in% "Summer" & month(as.POSIXct(start)) %in% 6:7) |
-              (input$semester %in% "Fall" & month(as.POSIXct(start)) %in% 8:12)
-          )
-      }
-      
-      filtered_titles <- unique(filtered_data$title)
-    }
-    
-    # Render selectInput for workshop titles
-    selectInput("title", "Select Workshop Title", choices = sort(filtered_titles), multiple = TRUE)
+  # Dynamically update the School dropdown based on filtered data
+  output$school_ui <- renderUI({
+    # Get unique, non-null, non-'OTHER' school choices from filtered data
+    school_choices <- unique(filtered_data()$School[!is.na(filtered_data()$School) & !filtered_data()$School %in% c('OTHER')])
+    selectInput("school", "School:", choices = c("", school_choices), selected = NULL, multiple = TRUE)
   })
   
-  # Filter data based on user inputs
-  data_filtered <- reactive({
-    filtered_df <- transformed_data %>%
-      filter((year_value %in% input$year) | is.null(input$year)) %>%
-      filter((Category %in% input$category) | is.null(input$category)) %>%
-      filter((title %in% input$title) | is.null(input$title)) %>%
-      filter((School %in% input$school) | is.null(input$school)) %>%
-      filter(School != "OTHER") %>%
-      filter(!grepl("\\(unknown\\)", Status)) %>%  # Filter out (unknown) statuses
-      filter(!grepl("student worker", Status, ignore.case = TRUE))  # Exclude student worker statuses
+  # Render the Plotly bar plot
+  output$workshopPlot <- renderPlotly({
+    data_filtered <- filtered_data()
     
-    # Ensure 'start' is a date-time object
-    filtered_df$start <- as.POSIXct(filtered_df$start)
+    # Aggregate the number of registrants by time_of_day and Category
+    registrants_by_time_category <- data_filtered %>%
+      group_by(time_of_day, Category) %>%
+      summarise(num_registrants = n_distinct(booking_id), .groups = 'drop')
     
-    # Filter by semester if specified
-    if (length(input$semester) > 0) {
-      filtered_df <- filtered_df %>%
-        filter(
-          (input$semester %in% "Spring" & month(start) %in% 1:5) |
-            (input$semester %in% "Summer" & month(start) %in% 6:7) |
-            (input$semester %in% "Fall" & month(start) %in% 8:12)
-        )
-    }
+    # Determine a color palette based on the number of categories
+    num_categories <- n_distinct(registrants_by_time_category$Category)
+    color_palette <- brewer.pal(min(num_categories, 12), "Set2")
     
-    # Process 'Status' if present and filter out unwanted statuses
-    if ("Status" %in% names(filtered_df)) {
-      filtered_df$Status <- as.character(filtered_df$Status)  # Ensure Status is character
-      filtered_df %>%
-        separate_rows(Status, sep = ",") %>%
-        filter(!grepl("student worker", Status, ignore.case = TRUE)) %>%  # Exclude student workers again after separating
-        group_by(School, Status) %>%
-        summarise(count = n_distinct(email), .groups = 'drop')  # Summarize data
-    } else {
-      return(data.frame())  # Return an empty data frame if Status is not present
-    }
-  })
-  
-  # Render the bar plot based on filtered data
-  output$barPlot <- renderPlotly({
-    data_long_df <- data_filtered()
-    
-    # Check if there is data to plot
-    if (nrow(data_long_df) == 0) {
-      return(NULL)
-    }
-    
-    # Create the bar graph
-    p <- ggplot(data_long_df, aes(x = School, y = count, fill = Status)) +
-      geom_bar(stat = "identity", position = "stack") +
-      labs(title = "Demographics by School and Status", x = "School", y = "Count") +
-      theme_minimal() +
-      theme(legend.position = "right") + 
-      theme(axis.text.x = element_text(angle = 45, hjust = 1))  # Rotate x-axis text
-    
-    # Convert ggplot to plotly for interactivity
-    ggplotly(p)
+    # Create a Plotly bar plot
+    plot_ly(data = registrants_by_time_category, 
+            x = ~time_of_day, 
+            y = ~num_registrants, 
+            color = ~Category, 
+            colors = color_palette, 
+            type = 'bar', 
+            text = ~paste("Category:", Category, 
+                          "<br>Time:", time_of_day, 
+                          "<br>Registrants:", num_registrants),
+            hoverinfo = 'text',
+            textinfo = 'none') %>%  # Ensure no text appears directly on bars
+      layout(title = "Number of Registrants by Time of Day and Category",
+             xaxis = list(title = "Time of Day"),
+             yaxis = list(title = "Number of Registrants"),
+             barmode = 'stack')  # Stack bars to show breakdown by Category
   })
 }
 
